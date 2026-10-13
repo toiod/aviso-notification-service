@@ -1,0 +1,44 @@
+name: aviso
+
+services:
+  postgres:
+    image: postgres:16-alpine
+
+    environment:
+      POSTGRES_DB: notifications
+      POSTGRES_USER: notification
+      POSTGRES_PASSWORD: notification_local
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "notification", "-d", "notifications"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - redis_data:/data
+
+    command:
+      ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  postgres_data:
+  redis_data:
