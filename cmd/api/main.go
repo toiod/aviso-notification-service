@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
+	"time"
+
+	"github.com/4mzy/aviso-notification-service/internal/config"
 )
 
 type healthResponse struct {
@@ -20,25 +23,28 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("encode health response: %v", err)
+		slog.Error("encode health response", "error", err)
 	}
 }
 
 func main() {
-	addr := os.Getenv("HTTP_ADDR")
-	if addr == "" {
-		addr = ":8080"
-	}
+	cfg := config.Load()
+	addr := cfg.HTTPAddr
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
 	server := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
-	log.Printf("http server started on %s", addr)
+	slog.Info("http server started", "addr", addr)
 
 	if err := server.ListenAndServe(); err != nil {
-		log.Fatal(err)
+		slog.Error("server failed", "err", err)
+		os.Exit(1)
 	}
 }
