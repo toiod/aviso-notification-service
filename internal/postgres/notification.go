@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/4mzy/aviso-notification-service/internal/notification"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -43,4 +44,16 @@ func (r *NotificationRepository) Create(ctx context.Context, recipient, channel,
 	}
 
 	return id, nil
+}
+
+func (r *NotificationRepository) GetByID(ctx context.Context, id int64) (notification.Notification, error) {
+	var n notification.Notification
+	row := r.pool.QueryRow(ctx, `select id, recipient, channel, message, status, attempts, created_at,
+										sent_at, last_error, next_attempt_at  
+										from notifications where id = $1`, id)
+	err := row.Scan(&n.ID, &n.Recipient, &n.Channel, &n.Message, &n.Status, &n.Attempts, &n.CreatedAt, &n.SentAt, &n.LastError, &n.NextAttemptAt)
+	if err != nil {
+		return notification.Notification{}, fmt.Errorf("get notification by id: %w", err)
+	}
+	return n, nil
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -55,25 +56,41 @@ func TestNotificationRepository_Create(t *testing.T) {
 		t.Fatalf("expected positive id, got %d", id)
 	}
 
-	var gotRecipient, gotChannel, gotMessage, gotStatus string
-	err = pool.QueryRow(ctx, `select recipient, channel, message, status from notifications where id = $1`, id).Scan(&gotRecipient, &gotChannel, &gotMessage, &gotStatus)
-
+	got, err := repo.GetByID(ctx, id)
 	if err != nil {
-		t.Fatalf("read notificaton: %v", err)
+		t.Fatalf("get notification by id: %v", err)
+	}
+	if got.ID != id {
+		t.Errorf("id: expected %d, got %d", id, got.ID)
+	}
+	if got.Recipient != recipient {
+		t.Errorf("recipient: expected %q, got %q", recipient, got.Recipient)
+	}
+	if got.Channel != channel {
+		t.Errorf("channel: expected %q, got %q", channel, got.Channel)
+	}
+	if got.Message != message {
+		t.Errorf("message: expected %q, got %q", message, got.Message)
+	}
+	if got.Status != "pending" {
+		t.Errorf("status: expected %q, got %q", "pending", got.Status)
+	}
+	if got.Attempts != 0 {
+		t.Errorf("attempts: expected %d, got %d", 0, got.Attempts)
+	}
+	if got.CreatedAt.IsZero() {
+		t.Error("created_at: expected non-zero time")
+	}
+	if got.SentAt != nil {
+		t.Error("sent_at: expected nil value")
+	}
+	if got.LastError != nil {
+		t.Error("last_error: expected nil value")
+	}
+	if got.NextAttemptAt != nil {
+		t.Error("next_attempt_at: expected nil value")
 	}
 
-	if gotRecipient != recipient {
-		t.Errorf("recipient: expected %q, got %q", recipient, gotRecipient)
-	}
-	if gotChannel != channel {
-		t.Errorf("channel: expected %q, got %q", channel, gotChannel)
-	}
-	if gotMessage != message {
-		t.Errorf("message: expected %q, got %q", message, gotMessage)
-	}
-	if gotStatus != "pending" {
-		t.Errorf("status: expected %q, got %q", "pending", gotStatus)
-	}
 	var count int64
 	err = pool.QueryRow(ctx, `select count(*) from outbox where notification_id = $1`, id).Scan(&count)
 	if err != nil {
@@ -83,6 +100,10 @@ func TestNotificationRepository_Create(t *testing.T) {
 		t.Errorf("count of notification_id in outbox: expected %d, got %d", 1, count)
 	}
 
+	_, err = repo.GetByID(ctx, -1)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("expected no rows error, got: %v", err)
+	}
 }
 
 func TestNotificationRepository_CreateRollback(t *testing.T) {
