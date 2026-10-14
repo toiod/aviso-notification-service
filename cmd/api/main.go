@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/4mzy/aviso-notification-service/internal/config"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type healthResponse struct {
@@ -28,8 +30,30 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("config load error", "err", err)
+		os.Exit(1)
+	}
 	addr := cfg.HTTPAddr
+	dbURL := cfg.DatabaseURL
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		slog.Error("create postgres pool", "err", err)
+		os.Exit(1)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		slog.Error("ping postgres", "err", err)
+		pool.Close()
+		os.Exit(1)
+	}
+	defer pool.Close()
+	slog.Info("database connected")
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
 	server := &http.Server{
@@ -45,6 +69,8 @@ func main() {
 
 	if err := server.ListenAndServe(); err != nil {
 		slog.Error("server failed", "err", err)
+		pool.Close()
 		os.Exit(1)
 	}
+
 }

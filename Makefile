@@ -1,3 +1,6 @@
+-include .env
+export HTTP_ADDR DATABASE_URL
+
 .PHONY: up down run-api test migrate-up migrate-down migrate-status
 
 up:
