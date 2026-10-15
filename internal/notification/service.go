@@ -9,7 +9,9 @@ import (
 	"unicode/utf8"
 )
 
-var ErrValidation = errors.New("validation error")
+var (
+	ErrValidation = errors.New("validation error")
+)
 
 type Repository interface {
 	Create(ctx context.Context, recipient, channel, message string) (int64, error)

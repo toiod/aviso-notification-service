@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/4mzy/aviso-notification-service/internal/config"
+	"github.com/4mzy/aviso-notification-service/internal/httpapi"
+	"github.com/4mzy/aviso-notification-service/internal/notification"
+	"github.com/4mzy/aviso-notification-service/internal/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -54,8 +57,14 @@ func main() {
 	defer pool.Close()
 	slog.Info("database connected")
 
+	repo := postgres.NewNotificationRepository(pool)
+	service := notification.NewService(repo)
+	handler := httpapi.NewNotificationHandler(service)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
+	mux.HandleFunc("POST /notifications", handler.Create)
+
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
