@@ -11,10 +11,12 @@ import (
 
 var (
 	ErrValidation = errors.New("validation error")
+	ErrNotFound   = errors.New("not found")
 )
 
 type Repository interface {
 	Create(ctx context.Context, recipient, channel, message string) (int64, error)
+	GetByID(ctx context.Context, id int64) (Notification, error)
 }
 
 type Service struct {
@@ -39,4 +41,11 @@ func (s *Service) Create(ctx context.Context, recipient, channel, message string
 		return 0, fmt.Errorf("message validation error, %w", ErrValidation)
 	}
 	return s.repo.Create(ctx, recipient, channel, message)
+}
+
+func (s *Service) GetByID(ctx context.Context, id int64) (Notification, error) {
+	if id <= 0 {
+		return Notification{}, ErrValidation
+	}
+	return s.repo.GetByID(ctx, id)
 }

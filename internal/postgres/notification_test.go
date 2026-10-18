@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/toiod/aviso-notification-service/internal/notification"
 )
 
 func TestNotificationRepository_Create(t *testing.T) {
@@ -101,8 +101,8 @@ func TestNotificationRepository_Create(t *testing.T) {
 	}
 
 	_, err = repo.GetByID(ctx, -1)
-	if !errors.Is(err, pgx.ErrNoRows) {
-		t.Fatalf("expected no rows error, got: %v", err)
+	if !errors.Is(err, notification.ErrNotFound) {
+		t.Fatalf("expected not found error, got: %v", err)
 	}
 }
 

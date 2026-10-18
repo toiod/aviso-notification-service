@@ -2,8 +2,10 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/toiod/aviso-notification-service/internal/notification"
 )
@@ -52,7 +54,11 @@ func (r *NotificationRepository) GetByID(ctx context.Context, id int64) (notific
 										sent_at, last_error, next_attempt_at  
 										from notifications where id = $1`, id)
 	err := row.Scan(&n.ID, &n.Recipient, &n.Channel, &n.Message, &n.Status, &n.Attempts, &n.CreatedAt, &n.SentAt, &n.LastError, &n.NextAttemptAt)
+
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return notification.Notification{}, notification.ErrNotFound
+		}
 		return notification.Notification{}, fmt.Errorf("get notification by id: %w", err)
 	}
 	return n, nil

@@ -16,6 +16,10 @@ func (f *fakeRepository) Create(ctx context.Context, recipient, channel, message
 	return 42, nil
 }
 
+func (f *fakeRepository) GetByID(ctx context.Context, id int64) (Notification, error) {
+	return Notification{}, nil
+}
+
 func TestService_Create(t *testing.T) {
 	tests := []struct {
 		name              string

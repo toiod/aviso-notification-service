@@ -64,6 +64,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler)
 	mux.HandleFunc("POST /notifications", handler.Create)
+	mux.HandleFunc("GET /notifications/{id}", handler.GetByID)
 
 	server := &http.Server{
 		Addr:              addr,

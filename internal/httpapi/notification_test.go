@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 type fakeRepository struct {
 	called bool
 	err    error
+	result notification.Notification
 }
 
 func (f *fakeRepository) Create(ctx context.Context, recipient, channel, message string) (int64, error) {
@@ -22,6 +24,11 @@ func (f *fakeRepository) Create(ctx context.Context, recipient, channel, message
 		return 0, f.err
 	}
 	return 42, nil
+}
+
+func (f *fakeRepository) GetByID(ctx context.Context, id int64) (notification.Notification, error) {
+	f.called = true
+	return f.result, f.err
 }
 
 func TestHandler_Create(t *testing.T) {
@@ -118,6 +125,117 @@ func TestHandler_Create(t *testing.T) {
 				}
 			}
 
+		})
+	}
+}
+
+func TestHandler_GetByID(t *testing.T) {
+	tests := []struct {
+		name           string
+		path           string
+		repoResult     notification.Notification
+		repoErr        error
+		wantStatus     int
+		wantRepoCalled bool
+	}{
+		{
+			name: "found",
+			path: "/notifications/32",
+			repoResult: notification.Notification{
+				ID:        32,
+				Recipient: "123",
+				Channel:   "telegram",
+				Message:   "hello",
+				Status:    "pending",
+			},
+			repoErr:        nil,
+			wantStatus:     200,
+			wantRepoCalled: true,
+		},
+		{
+			name:           "id: abc",
+			path:           "/notifications/abc",
+			repoResult:     notification.Notification{},
+			repoErr:        nil,
+			wantStatus:     400,
+			wantRepoCalled: false,
+		},
+		{
+			name:           "id: 0",
+			path:           "/notifications/0",
+			repoResult:     notification.Notification{},
+			repoErr:        nil,
+			wantStatus:     400,
+			wantRepoCalled: false,
+		},
+		{
+			name:           "not found",
+			path:           "/notifications/3241234",
+			repoResult:     notification.Notification{},
+			repoErr:        notification.ErrNotFound,
+			wantStatus:     404,
+			wantRepoCalled: true,
+		},
+		{
+			name:           "another repo error",
+			path:           "/notifications/32",
+			repoResult:     notification.Notification{},
+			repoErr:        errors.New("database unavailable"),
+			wantStatus:     500,
+			wantRepoCalled: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeRepository{err: tt.repoErr, result: tt.repoResult}
+			service := notification.NewService(repo)
+			handler := NewNotificationHandler(service)
+
+			req := httptest.NewRequest("GET", tt.path, nil)
+
+			mux := http.NewServeMux()
+			mux.HandleFunc("GET /notifications/{id}", handler.GetByID)
+
+			recorder := httptest.NewRecorder()
+			mux.ServeHTTP(recorder, req)
+
+			if recorder.Code != tt.wantStatus {
+				t.Errorf("status code: expected: %d, got %d", tt.wantStatus, recorder.Code)
+			}
+			if repo.called != tt.wantRepoCalled {
+				t.Errorf("repository called: expected: %t, got %t", tt.wantRepoCalled, repo.called)
+			}
+
+			if tt.wantStatus == 200 {
+				var response notification.Notification
+				if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+					t.Fatalf("decode response: %v", err)
+				}
+
+				if response.ID != tt.repoResult.ID {
+					t.Errorf("id: expected %v, got %v", tt.repoResult.ID, response.ID)
+				}
+
+				if response.Message != tt.repoResult.Message {
+					t.Errorf("message: expected %v, got %v", tt.repoResult.Message, response.Message)
+				}
+
+				if response.Status != tt.repoResult.Status {
+					t.Errorf("status: expected %v, got %v", tt.repoResult.Status, response.Status)
+				}
+
+				if recorder.Header().Get("Content-Type") != "application/json" {
+					t.Errorf("Header Content-Type: expected application/json, got %v", recorder.Header().Get("Content-Type"))
+				}
+
+			}
+
+			if tt.wantStatus == 500 && tt.repoErr != nil {
+				if strings.Contains(recorder.Body.String(), tt.repoErr.Error()) {
+					t.Error("response contains internal server error")
+				}
+			}
 		})
 	}
 }

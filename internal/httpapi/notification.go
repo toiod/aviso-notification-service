@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/toiod/aviso-notification-service/internal/notification"
 )
@@ -73,5 +74,32 @@ func (h *NotificationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		slog.Error("encode notification response", "error", err)
+	}
+}
+
+func (h *NotificationHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "convert value from path to int", http.StatusBadRequest)
+		return
+	}
+	result, err := h.service.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, notification.ErrValidation) {
+			http.Error(w, "validation error", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, notification.ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		slog.Error("internal server error", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		slog.Error("encode element by id", "error", err)
 	}
 }
