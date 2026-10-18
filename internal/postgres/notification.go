@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/4mzy/aviso-notification-service/internal/notification"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/toiod/aviso-notification-service/internal/notification"
 )
 
 type NotificationRepository struct {

@@ -8,11 +8,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/4mzy/aviso-notification-service/internal/config"
-	"github.com/4mzy/aviso-notification-service/internal/httpapi"
-	"github.com/4mzy/aviso-notification-service/internal/notification"
-	"github.com/4mzy/aviso-notification-service/internal/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/toiod/aviso-notification-service/internal/config"
+	"github.com/toiod/aviso-notification-service/internal/httpapi"
+	"github.com/toiod/aviso-notification-service/internal/notification"
+	"github.com/toiod/aviso-notification-service/internal/postgres"
 )
 
 type healthResponse struct {

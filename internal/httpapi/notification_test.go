@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/4mzy/aviso-notification-service/internal/notification"
+	"github.com/toiod/aviso-notification-service/internal/notification"
 )
 
 type fakeRepository struct {

@@ -1,4 +1,4 @@
-module github.com/4mzy/aviso-notification-service
+module github.com/toiod/aviso-notification-service
 
 go 1.25.1
 
