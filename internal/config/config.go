@@ -8,6 +8,7 @@ import (
 type Config struct {
 	HTTPAddr    string
 	DatabaseURL string
+	RedisAddr   string
 }
 
 func Load() (Config, error) {
@@ -19,8 +20,13 @@ func Load() (Config, error) {
 	if databaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL is required")
 	}
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		return Config{}, fmt.Errorf("REDIS_ADDR is required")
+	}
 	return Config{
 		HTTPAddr:    httpAddr,
 		DatabaseURL: databaseURL,
+		RedisAddr:   redisAddr,
 	}, nil
 }
