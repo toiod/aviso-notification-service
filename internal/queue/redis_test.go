@@ -19,7 +19,8 @@ func TestRedisQueue_PublishReadAck(t *testing.T) {
 	defer cancel()
 
 	client := redis.NewClient(&redis.Options{
-		Addr: addr,
+		Addr:                  addr,
+		ContextTimeoutEnabled: true,
 	})
 	defer client.Close()
 

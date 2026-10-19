@@ -43,7 +43,8 @@ func main() {
 	slog.Info("database connected")
 
 	client := redis.NewClient(&redis.Options{
-		Addr: redisAddr,
+		Addr:                  redisAddr,
+		ContextTimeoutEnabled: true,
 	})
 	defer client.Close()
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
