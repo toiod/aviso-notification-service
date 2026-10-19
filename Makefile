@@ -1,7 +1,7 @@
 -include .env
 export HTTP_ADDR DATABASE_URL REDIS_ADDR
 
-.PHONY: up down run-api test migrate-up migrate-down migrate-status
+.PHONY: up down run-api test migrate-up migrate-down migrate-status run-worker
 
 up:
 	docker compose up -d
@@ -23,3 +23,6 @@ migrate-down:
 
 migrate-status:
 	goose -dir migrations status
+
+run-worker:
+	go run ./cmd/worker
