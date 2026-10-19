@@ -63,3 +63,34 @@ func (r *NotificationRepository) GetByID(ctx context.Context, id int64) (notific
 	}
 	return n, nil
 }
+
+func (r *NotificationRepository) StartAttempt(ctx context.Context, id int64) (int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	queryUpdate := `update notifications 
+				set status = 'processing',
+					attempts = attempts + 1,
+					next_attempt_at = NULL
+				where id = $1 and status = 'pending' and attempts < 5
+				returning attempts`
+	var attemptNo int
+	err = tx.QueryRow(ctx, queryUpdate, id).Scan(&attemptNo)
+	if err != nil {
+		return 0, fmt.Errorf("get attempt no: %w", err)
+	}
+	queryInsert := `insert into notification_attempts
+						(notification_id, attempt_no)
+					values ($1, $2)`
+	_, err = tx.Exec(ctx, queryInsert, id, attemptNo)
+	if err != nil {
+		return 0, fmt.Errorf("insert notification attempt: %w", err)
+	}
+	err = tx.Commit(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("commit transaction: %w", err)
+	}
+	return attemptNo, nil
+}
