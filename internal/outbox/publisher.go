@@ -3,6 +3,8 @@ package outbox
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"time"
 )
 
 type Repository interface {
@@ -43,4 +45,26 @@ func (p *Publisher) RunOnce(ctx context.Context) error {
 
 	}
 	return nil
+}
+
+func (p *Publisher) Run(ctx context.Context) error {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := p.RunOnce(timeoutCtx)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			slog.Error("publisher pass failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			continue
+		}
+	}
 }
