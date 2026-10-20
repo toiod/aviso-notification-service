@@ -6,9 +6,10 @@ import (
 )
 
 type Config struct {
-	HTTPAddr    string
-	DatabaseURL string
-	RedisAddr   string
+	HTTPAddr         string
+	DatabaseURL      string
+	RedisAddr        string
+	TelegramBotToken string
 }
 
 func Load() (Config, error) {
@@ -24,9 +25,11 @@ func Load() (Config, error) {
 	if redisAddr == "" {
 		return Config{}, fmt.Errorf("REDIS_ADDR is required")
 	}
+	telegramBotToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	return Config{
-		HTTPAddr:    httpAddr,
-		DatabaseURL: databaseURL,
-		RedisAddr:   redisAddr,
+		HTTPAddr:         httpAddr,
+		DatabaseURL:      databaseURL,
+		RedisAddr:        redisAddr,
+		TelegramBotToken: telegramBotToken,
 	}, nil
 }

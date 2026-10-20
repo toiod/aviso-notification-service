@@ -1,5 +1,5 @@
 -include .env
-export HTTP_ADDR DATABASE_URL REDIS_ADDR
+export HTTP_ADDR DATABASE_URL REDIS_ADDR TELEGRAM_BOT_TOKEN
 
 .PHONY: up down run-api test migrate-up migrate-down migrate-status run-worker
 
