@@ -142,6 +142,38 @@ func TestNotificationRepository_Create(t *testing.T) {
 		t.Errorf("finished_at: expected %v, got %v", nil, finished_at)
 	}
 
+	err = repo.MarkSent(ctx, id, attemptNo)
+	if err != nil {
+		t.Fatalf("mark notification sent: %v", err)
+	}
+	nf, err = repo.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf("get notification after mark sent: %v", err)
+	}
+	if nf.Status != "sent" {
+		t.Errorf("status: expected %s, got %s", "sent", nf.Status)
+	}
+	if nf.Attempts != 1 {
+		t.Errorf("notificatio attempts: expected %d, got %d", 1, nf.Attempts)
+	}
+	if nf.SentAt == nil {
+		t.Error("sent_at: expected non-nil value")
+	}
+
+	err = pool.QueryRow(ctx, `select outcome, finished_at from notification_attempts 
+								where notification_id = $1 and attempt_no = $2`, id, attemptNo).Scan(
+		&outcome, &finished_at,
+	)
+	if err != nil {
+		t.Fatalf("scan values for check after mark: %v", err)
+	}
+	if outcome != "success" {
+		t.Errorf("outcome: expected %s, got %s", "success", outcome)
+	}
+	if finished_at == nil {
+		t.Errorf("finished_at: expected non-nil value")
+	}
+
 	_, err = repo.GetByID(ctx, -1)
 	if !errors.Is(err, notification.ErrNotFound) {
 		t.Fatalf("expected not found error, got: %v", err)
