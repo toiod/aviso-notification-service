@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -14,6 +16,8 @@ import (
 	"github.com/toiod/aviso-notification-service/internal/outbox"
 	"github.com/toiod/aviso-notification-service/internal/postgres"
 	"github.com/toiod/aviso-notification-service/internal/queue"
+	"github.com/toiod/aviso-notification-service/internal/sender"
+	"github.com/toiod/aviso-notification-service/internal/worker"
 )
 
 func main() {
@@ -61,10 +65,34 @@ func main() {
 	workerCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	err = publisher.Run(workerCtx)
+	notificationRepo := postgres.NewNotificationRepository(pool)
+	sender := &sender.MockSender{}
+	processor := worker.NewWorker(notificationRepo, redisQueue, sender)
+	groupCtx, groupCancel := context.WithTimeout(workerCtx, 5*time.Second)
+	err = redisQueue.EnsureGroup(groupCtx)
+	groupCancel()
 	if err != nil {
-		slog.Error("run publisher", "error", err)
+		slog.Error("ensure group", "error", err)
 		os.Exit(1)
 	}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := publisher.Run(workerCtx)
+		if err != nil {
+			slog.Error("run publisher", "error", err)
+			stop()
+		}
+
+	}()
+
+	err = processor.Run(workerCtx, "worker"+strconv.FormatInt(time.Now().UnixNano(), 10))
+	if err != nil {
+		slog.Error("run processor", "error", err)
+		stop()
+	}
+	stop()
+	wg.Wait()
 	slog.Info("worker stopped")
 }
