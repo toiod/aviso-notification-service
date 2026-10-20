@@ -3,7 +3,11 @@ package worker
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"strconv"
+	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/toiod/aviso-notification-service/internal/notification"
 	"github.com/toiod/aviso-notification-service/internal/sender"
 )
@@ -16,6 +20,7 @@ type Repository interface {
 
 type Queue interface {
 	Ack(ctx context.Context, streamID string) error
+	Read(ctx context.Context, consumer string) ([]redis.XStream, error)
 }
 
 type Worker struct {
@@ -61,4 +66,53 @@ func (w *Worker) Process(ctx context.Context, streamID string, notificationID in
 		return fmt.Errorf("ack queue: %w", err)
 	}
 	return nil
+}
+
+func (w *Worker) Run(ctx context.Context, consumer string) error {
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		streams, err := w.queue.Read(ctx, consumer)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			slog.Error("read error", "error", err)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(time.Second):
+				continue
+			}
+		}
+		for _, stream := range streams {
+			for _, message := range stream.Messages {
+				value, ok := message.Values["notification_id"].(string)
+				if !ok {
+					slog.Error("invalid notification_id field", "streamID", message.ID)
+					err = w.queue.Ack(ctx, message.ID)
+					if err != nil {
+						slog.Error("ack redis stream message", "error", err, "streamID", message.ID)
+					}
+					continue
+				}
+				notificationID, err := strconv.ParseInt(value, 10, 64)
+				if err != nil || notificationID <= 0 {
+					slog.Error("invalid notification_id field", "streamID", message.ID, "notificationID", value)
+					err = w.queue.Ack(ctx, message.ID)
+					if err != nil {
+						slog.Error("ack redis stream message", "error", err, "streamID", message.ID)
+					}
+					continue
+				}
+				streamID := message.ID
+				err = w.Process(ctx, streamID, notificationID)
+				if err != nil {
+					slog.Error("worker proccess", "error", err, "streamID", streamID, "notificationID", notificationID)
+				}
+
+			}
+		}
+	}
 }

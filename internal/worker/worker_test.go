@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/toiod/aviso-notification-service/internal/notification"
 )
 
@@ -58,6 +59,9 @@ func (fq *fakeQueue) Ack(ctx context.Context, streamID string) error {
 	return nil
 }
 
+func (fq *fakeQueue) Read(ctx context.Context, consumer string) ([]redis.XStream, error) {
+	return nil, nil
+}
 func TestWorker_Process_Success(t *testing.T) {
 	repo := &fakeRepository{
 		nf: notification.Notification{
