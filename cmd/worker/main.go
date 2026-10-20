@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -24,6 +25,11 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("config load error", "error", err)
+		os.Exit(1)
+	}
+
+	if cfg.TelegramBotToken == "" {
+		slog.Error("TELEGRAM_BOT_TOKEN is required")
 		os.Exit(1)
 	}
 
@@ -66,8 +72,11 @@ func main() {
 	defer stop()
 
 	notificationRepo := postgres.NewNotificationRepository(pool)
-	sender := &sender.MockSender{}
-	processor := worker.NewWorker(notificationRepo, redisQueue, sender)
+	httpClient := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	telegramSender := sender.NewTelegramSender(cfg.TelegramBotToken, httpClient)
+	processor := worker.NewWorker(notificationRepo, redisQueue, telegramSender)
 	groupCtx, groupCancel := context.WithTimeout(workerCtx, 5*time.Second)
 	err = redisQueue.EnsureGroup(groupCtx)
 	groupCancel()
