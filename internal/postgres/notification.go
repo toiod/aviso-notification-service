@@ -130,3 +130,39 @@ func (r *NotificationRepository) MarkSent(ctx context.Context, id int64, attempt
 	}
 	return nil
 }
+
+func (r *NotificationRepository) MarkFailed(ctx context.Context, id int64, attemptNo int, errorMessage string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	queryUpdate1 := `update notifications set status = 'failed',
+											last_error = $3, 
+											next_attempt_at = NULL, 
+											sent_at = NULL
+					where id = $1 and status = 'processing' and attempts = $2`
+	tag, err := tx.Exec(ctx, queryUpdate1, id, attemptNo, errorMessage)
+	if err != nil {
+		return fmt.Errorf("mark notification failed: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("notification not in expected state")
+	}
+	queryUpdate2 := `update notification_attempts set outcome = 'permanent_error',
+														finished_at = now(),
+														error = $3
+					where notification_id = $1 and outcome = 'started' and attempt_no = $2`
+	tag, err = tx.Exec(ctx, queryUpdate2, id, attemptNo, errorMessage)
+	if err != nil {
+		return fmt.Errorf("mark notification fail permanently: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("notification not in expected state")
+	}
+	err = tx.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
+}

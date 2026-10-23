@@ -240,3 +240,103 @@ func TestNotificationRepository_CreateRollback(t *testing.T) {
 		t.Errorf("count of notification_id in outbox: expected %d, got %d", 0, count)
 	}
 }
+
+func TestNotificationRepository_MarkFailed(t *testing.T) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("create pool: %v", err)
+	}
+	defer pool.Close()
+
+	repo := NewNotificationRepository(pool)
+
+	recipient := "123456789"
+	channel := "telegram"
+	message := "integration test"
+
+	id, err := repo.Create(ctx, recipient, channel, message)
+	if err != nil {
+		t.Fatalf("create notification: %v", err)
+	}
+
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, err = pool.Exec(cleanupCtx, `delete from outbox where notification_id = $1`, id)
+		if err != nil {
+			t.Errorf("cleanup outbox: %v", err)
+		}
+
+		_, err := pool.Exec(cleanupCtx, `delete from notification_attempts where notification_id = $1`, id)
+		if err != nil {
+			t.Errorf("cleanup notification attempt: %v", err)
+		}
+
+		_, err = pool.Exec(cleanupCtx, `delete from notifications where id = $1`, id)
+		if err != nil {
+			t.Errorf("cleanup notifications: %v", err)
+		}
+
+	}()
+
+	attemptNo, err := repo.StartAttempt(ctx, id)
+	if err != nil {
+		t.Fatalf("start send attempt: %v", err)
+	}
+	if attemptNo != 1 {
+		t.Errorf("attempt number: expected %d, got %d", 1, attemptNo)
+	}
+
+	errorMessage := "bot was blocked"
+	err = repo.MarkFailed(ctx, id, attemptNo, errorMessage)
+	if err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+	nf, err := repo.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf("get by id: %v", err)
+	}
+
+	if nf.Status != "failed" {
+		t.Errorf("status: expected failed, got %s", nf.Status)
+	}
+	if nf.Attempts != 1 {
+		t.Errorf("attempts: expected 1, got %d", nf.Attempts)
+	}
+	if nf.SentAt != nil {
+		t.Errorf("sent_at: expected null, got %v", nf.SentAt)
+	}
+	if nf.LastError == nil {
+		t.Fatalf("not expected last error")
+	}
+	if *nf.LastError != errorMessage {
+		t.Errorf("*last_error: expected %s, got %s", errorMessage, *nf.LastError)
+	}
+
+	var outcome string
+	var attemptError string
+	var finishedAt *time.Time
+	err = pool.QueryRow(ctx, `select outcome, error, finished_at from notification_attempts
+						where notification_id = $1 and attempt_no = $2`,
+		id, attemptNo).Scan(&outcome, &attemptError, &finishedAt)
+	if err != nil {
+		t.Fatalf("row scan: %v", err)
+	}
+	if outcome != "permanent_error" {
+		t.Errorf("outcome: expected permanent_error, got %v", outcome)
+	}
+	if attemptError != errorMessage {
+		t.Errorf("attempt_error: expected %s, got %s", errorMessage, attemptError)
+	}
+	if finishedAt == nil {
+		t.Errorf("finished_at expected not null")
+	}
+
+}
