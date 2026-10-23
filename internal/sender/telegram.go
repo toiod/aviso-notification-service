@@ -31,6 +31,9 @@ type TGResponse struct {
 	OK          bool   `json:"ok"`
 	Description string `json:"description"`
 	ErrorCode   int    `json:"error_code"`
+	Parameters  struct {
+		RetryAfter int `json:"retry_after"`
+	} `json:"parameters"`
 }
 
 func (tgs *TelegramSender) Send(ctx context.Context, recipient, message string) error {
@@ -59,13 +62,32 @@ func (tgs *TelegramSender) Send(ctx context.Context, recipient, message string) 
 	}
 	defer resp.Body.Close()
 	var tgResponse TGResponse
-	err = json.NewDecoder(resp.Body).Decode(&tgResponse)
-	if err != nil {
-		return fmt.Errorf("decode telegram response: %w", err)
+	decodeErr := json.NewDecoder(resp.Body).Decode(&tgResponse)
+
+	if resp.StatusCode != http.StatusOK {
+		description := tgResponse.Description
+		if decodeErr != nil {
+			description = "invalid Telegram response"
+		}
+		return &TelegramError{
+			HTTPStatus:  resp.StatusCode,
+			Code:        tgResponse.ErrorCode,
+			Description: description,
+			RetryAfter:  tgResponse.Parameters.RetryAfter,
+		}
 	}
 
-	if resp.StatusCode != http.StatusOK || !tgResponse.OK {
-		return fmt.Errorf("telegram HTTP %d, code %d: %s", resp.StatusCode, tgResponse.ErrorCode, tgResponse.Description)
+	if decodeErr != nil {
+		return fmt.Errorf("decode telegram response: %w", decodeErr)
+	}
+
+	if !tgResponse.OK {
+		return &TelegramError{
+			HTTPStatus:  resp.StatusCode,
+			Code:        tgResponse.ErrorCode,
+			Description: tgResponse.Description,
+			RetryAfter:  tgResponse.Parameters.RetryAfter,
+		}
 	}
 
 	return nil
