@@ -75,3 +75,19 @@ func (q *RedisQueue) Ack(ctx context.Context, streamID string) error {
 	}
 	return nil
 }
+
+func (q *RedisQueue) AutoClaim(ctx context.Context, consumer string, cursor string, minIdle time.Duration) ([]redis.XMessage, string, error) {
+	args := redis.XAutoClaimArgs{
+		Stream:   q.stream,
+		Group:    q.group,
+		MinIdle:  minIdle,
+		Start:    cursor,
+		Count:    1,
+		Consumer: consumer,
+	}
+	messages, nextCursor, err := q.client.XAutoClaim(ctx, &args).Result()
+	if err != nil {
+		return nil, "", fmt.Errorf("auto claim messages: %w", err)
+	}
+	return messages, nextCursor, nil
+}
