@@ -7,6 +7,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/toiod/aviso-notification-service/internal/notification"
+	"github.com/toiod/aviso-notification-service/internal/sender"
 )
 
 type fakeRepository struct {
@@ -17,12 +18,18 @@ type fakeRepository struct {
 	markedAttempt int
 	markErr       error
 	startCalled   bool
+	markFailed    bool
+	failedID      int64
+	failedAttempt int
+	failedMessage string
+	markFailedErr error
 }
 
 type fakeSender struct {
 	called    bool
 	recipient string
 	message   string
+	err       error
 }
 
 type fakeQueue struct {
@@ -46,11 +53,20 @@ func (fr *fakeRepository) MarkSent(ctx context.Context, id int64, attemptNo int)
 	return fr.markErr
 }
 
+func (fr *fakeRepository) MarkFailed(ctx context.Context, id int64, attemptNo int, errorMessage string) error {
+	fr.markFailed = true
+	fr.failedID = id
+	fr.failedAttempt = attemptNo
+	fr.failedMessage = errorMessage
+
+	return fr.markFailedErr
+}
+
 func (fs *fakeSender) Send(ctx context.Context, recipient, message string) error {
 	fs.called = true
 	fs.recipient = recipient
 	fs.message = message
-	return nil
+	return fs.err
 }
 
 func (fq *fakeQueue) Ack(ctx context.Context, streamID string) error {
@@ -169,5 +185,50 @@ func TestWorker_Process_Terminal(t *testing.T) {
 	}
 	if queue.streamID != "1234567890-0" {
 		t.Errorf("queue stream id: expected %s, got %s", "1234567890-0", queue.streamID)
+	}
+}
+
+func TestWorker_Process_PermanentError(t *testing.T) {
+	repo := &fakeRepository{
+		nf: notification.Notification{
+			ID:        33,
+			Recipient: "123",
+			Message:   "hello",
+			Status:    "pending",
+		},
+		attemptNo: 1,
+	}
+	sendErr := &sender.TelegramError{
+		HTTPStatus:  403,
+		Code:        403,
+		Description: "bot was blocked",
+	}
+	queue := &fakeQueue{}
+	fakeSend := &fakeSender{err: sendErr}
+	worker := NewWorker(repo, queue, fakeSend)
+	err := worker.Process(t.Context(), "1234567890-0", 33)
+	if err != nil {
+		t.Fatalf("worker process: %v", err)
+	}
+	if repo.markFailed != true {
+		t.Errorf("mark failed: expected %t, got %t", true, repo.markFailed)
+	}
+	if repo.failedID != 33 {
+		t.Errorf("failed id: expected %d, got %d", 33, repo.failedID)
+	}
+	if repo.failedAttempt != 1 {
+		t.Errorf("failed attempt: expected %d, got %d", 1, repo.failedAttempt)
+	}
+	if repo.failedMessage != sendErr.Error() {
+		t.Errorf("failed message: expected %s, got %s", sendErr.Error(), repo.failedMessage)
+	}
+	if repo.markSent != false {
+		t.Errorf("mark sent: expected %t, got %t", false, repo.markSent)
+	}
+	if queue.ack != true {
+		t.Errorf("queue ack: expected %t, got %t", true, queue.ack)
+	}
+	if queue.streamID != "1234567890-0" {
+		t.Errorf("queue ack: expected %s, got %s", "1234567890-0", queue.streamID)
 	}
 }

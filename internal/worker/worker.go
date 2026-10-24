@@ -16,6 +16,7 @@ type Repository interface {
 	GetByID(ctx context.Context, id int64) (notification.Notification, error)
 	StartAttempt(ctx context.Context, id int64) (int, error)
 	MarkSent(ctx context.Context, id int64, attemptNo int) error
+	MarkFailed(ctx context.Context, id int64, attemptNo int, errorMessage string) error
 }
 
 type Queue interface {
@@ -55,6 +56,18 @@ func (w *Worker) Process(ctx context.Context, streamID string, notificationID in
 	}
 	err = w.sender.Send(ctx, nf.Recipient, nf.Message)
 	if err != nil {
+		kind, _ := classifySendError(err)
+		if kind == failurePermanent {
+			saveErr := w.repo.MarkFailed(ctx, notificationID, attemptNo, err.Error())
+			if saveErr != nil {
+				return fmt.Errorf("mark notification failed: %w", saveErr)
+			}
+			err = w.queue.Ack(ctx, streamID)
+			if err != nil {
+				return fmt.Errorf("ack error: %w", err)
+			}
+			return nil
+		}
 		return fmt.Errorf("send notification: %w", err)
 	}
 	err = w.repo.MarkSent(ctx, notificationID, attemptNo)
