@@ -75,7 +75,7 @@ func (r *NotificationRepository) StartAttempt(ctx context.Context, id int64) (in
 				set status = 'processing',
 					attempts = attempts + 1,
 					next_attempt_at = NULL
-				where id = $1 and status = 'pending' and attempts < 5
+				where id = $1 and status = 'pending' and attempts < 5 and (next_attempt_at is null or next_attempt_at <= now())
 				returning attempts`
 	var attemptNo int
 	err = tx.QueryRow(ctx, queryUpdate, id).Scan(&attemptNo)

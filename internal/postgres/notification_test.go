@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/toiod/aviso-notification-service/internal/notification"
@@ -441,6 +442,22 @@ func TestNotificationRepository_MarkTemporaryFailure(t *testing.T) {
 	}
 	if gotFinishedAt == nil {
 		t.Errorf("got finished_at: expected not null")
+	}
+	_, err = repo.StartAttempt(ctx, id)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("expected early attempt to be rejected, got: %v", err)
+	}
+	nf, err = repo.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf(": %v", err)
+	}
+
+	if nf.Status != "pending" {
+		t.Errorf("status: expected pending, got %s", nf.Status)
+	}
+
+	if nf.Attempts != 1 {
+		t.Errorf("attempts: expected 1, got %d", nf.Attempts)
 	}
 	tag, err := pool.Exec(ctx, `update notifications set next_attempt_at = now() - interval '1 second' where id = $1`, id)
 	if err != nil {
