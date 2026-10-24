@@ -340,3 +340,143 @@ func TestNotificationRepository_MarkFailed(t *testing.T) {
 	}
 
 }
+
+func TestNotificationRepository_MarkTemporaryFailure(t *testing.T) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("create pool: %v", err)
+	}
+	defer pool.Close()
+
+	repo := NewNotificationRepository(pool)
+
+	recipient := "123456789"
+	channel := "telegram"
+	message := "integration test"
+
+	id, err := repo.Create(ctx, recipient, channel, message)
+	if err != nil {
+		t.Fatalf("create notification: %v", err)
+	}
+
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, err = pool.Exec(cleanupCtx, `delete from outbox where notification_id = $1`, id)
+		if err != nil {
+			t.Errorf("cleanup outbox: %v", err)
+		}
+
+		_, err := pool.Exec(cleanupCtx, `delete from notification_attempts where notification_id = $1`, id)
+		if err != nil {
+			t.Errorf("cleanup notification attempt: %v", err)
+		}
+
+		_, err = pool.Exec(cleanupCtx, `delete from notifications where id = $1`, id)
+		if err != nil {
+			t.Errorf("cleanup notifications: %v", err)
+		}
+
+	}()
+
+	attemptNo, err := repo.StartAttempt(ctx, id)
+	if err != nil {
+		t.Fatalf("start send attempt: %v", err)
+	}
+
+	errorMessage := "telegram temporarily unavailable"
+	nextAttempt := time.Now().UTC().Add(time.Minute).Truncate(time.Microsecond)
+
+	err = repo.MarkTemporaryFailure(ctx, id, attemptNo, errorMessage, nextAttempt)
+	if err != nil {
+		t.Fatalf("mark temporary failure: %v", err)
+	}
+
+	nf, err := repo.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf("get by id: %v", err)
+	}
+
+	if nf.Status != "pending" {
+		t.Errorf("status: expected pending, got %s", nf.Status)
+	}
+	if nf.Attempts != 1 {
+		t.Errorf("attempts: expected 1, got %d", nf.Attempts)
+	}
+	if nf.LastError == nil {
+		t.Fatalf("last_error: expected not null")
+	}
+	if *nf.LastError != errorMessage {
+		t.Errorf("*last_error: expected %s, got %s", errorMessage, *nf.LastError)
+	}
+	if nf.NextAttemptAt == nil {
+		t.Fatalf("next_attempt_at: expected not null")
+	}
+	if !nf.NextAttemptAt.Equal(nextAttempt) {
+		t.Errorf("next_attempt_at: expected equal nextAttempt")
+	}
+	var gotOutcome string
+	var gotErr string
+	var gotFinishedAt *time.Time
+	err = pool.QueryRow(ctx, `select outcome, error, finished_at from notification_attempts
+						where notification_id = $1 and attempt_no = $2`, id, attemptNo).Scan(
+		&gotOutcome, &gotErr, &gotFinishedAt,
+	)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	if gotOutcome != "temporary_error" {
+		t.Errorf("got outcome: expected temporary_error, got %s", gotOutcome)
+	}
+	if gotErr != errorMessage {
+		t.Errorf("got outcome: expected %s, got %s", errorMessage, gotErr)
+	}
+	if gotFinishedAt == nil {
+		t.Errorf("got finished_at: expected not null")
+	}
+	tag, err := pool.Exec(ctx, `update notifications set next_attempt_at = now() - interval '1 second' where id = $1`, id)
+	if err != nil {
+		t.Fatalf("set retry time in past: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("notification not in expected state")
+	}
+	for i := 2; i <= 5; i++ {
+		attemptNo, err = repo.StartAttempt(ctx, id)
+		if err != nil {
+			t.Fatalf("start send attempt: %v", err)
+		}
+		if attemptNo != i {
+			t.Fatalf("expected attempt_no = cycle counter")
+		}
+		err = repo.MarkTemporaryFailure(ctx, id, attemptNo, errorMessage, time.Now().UTC().Add(-time.Second))
+		if err != nil {
+			t.Fatalf("mark temporary failure on attempt %d: %v", attemptNo, err)
+		}
+	}
+
+	nf, err = repo.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf(": %v", err)
+	}
+
+	if nf.Status != "failed" {
+		t.Errorf("status: expected failed, got %s", nf.Status)
+	}
+
+	if nf.Attempts != 5 {
+		t.Errorf("attempts: expected 5, got %d", nf.Attempts)
+	}
+
+	if nf.NextAttemptAt != nil {
+		t.Errorf("next_attempt_at: expected null")
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -159,6 +160,52 @@ func (r *NotificationRepository) MarkFailed(ctx context.Context, id int64, attem
 	}
 	if tag.RowsAffected() != 1 {
 		return fmt.Errorf("notification not in expected state")
+	}
+	err = tx.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
+}
+
+func (r *NotificationRepository) MarkTemporaryFailure(ctx context.Context, id int64, attemptNo int, errorMessage string, nextAttempt time.Time) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	status := "failed"
+	var retryAt *time.Time
+
+	if attemptNo >= 1 && attemptNo <= 4 {
+		status = "pending"
+		retryAt = &nextAttempt
+	}
+
+	queryUpdate1 := `update notifications set status = $3,
+											last_error = $4,
+											next_attempt_at = $5, 
+											sent_at = NULL
+					where id = $1 and status = 'processing' and attempts = $2`
+	tag, err := tx.Exec(ctx, queryUpdate1, id, attemptNo, status, errorMessage, retryAt)
+	if err != nil {
+		return fmt.Errorf("mark notification: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("notification not in expected state")
+	}
+
+	queryUpdate2 := `update notification_attempts set outcome = 'temporary_error',
+													finished_at = now(),
+													error = $3
+					where notification_id = $1 and outcome = 'started' and attempt_no = $2`
+	tag, err = tx.Exec(ctx, queryUpdate2, id, attemptNo, errorMessage)
+	if err != nil {
+		return fmt.Errorf("mark notifications attempts: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("notification attempts not in expected state")
 	}
 	err = tx.Commit(ctx)
 	if err != nil {
