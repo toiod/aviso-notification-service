@@ -17,6 +17,7 @@ type Repository interface {
 	StartAttempt(ctx context.Context, id int64) (int, error)
 	MarkSent(ctx context.Context, id int64, attemptNo int) error
 	MarkFailed(ctx context.Context, id int64, attemptNo int, errorMessage string) error
+	MarkTemporaryFailure(ctx context.Context, id int64, attemptNo int, errorMessage string, nextAttempt time.Time) error
 }
 
 type Queue interface {
@@ -39,46 +40,87 @@ func NewWorker(r Repository, q Queue, s sender.Sender) *Worker {
 }
 
 func (w *Worker) Process(ctx context.Context, streamID string, notificationID int64) error {
-	nf, err := w.repo.GetByID(ctx, notificationID)
-	if err != nil {
-		return fmt.Errorf("read notification: %w", err)
-	}
-	if nf.Status == "sent" || nf.Status == "failed" {
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		nf, err := w.repo.GetByID(ctx, notificationID)
+		if err != nil {
+			return fmt.Errorf("read notification: %w", err)
+		}
+		if nf.Status == "sent" || nf.Status == "failed" {
+			err = w.queue.Ack(ctx, streamID)
+			if err != nil {
+				return fmt.Errorf("ack queue: %w", err)
+			}
+			return nil
+		}
+		if nf.NextAttemptAt != nil {
+			remaining := time.Until(*nf.NextAttemptAt)
+			if remaining > 0 {
+				timer := time.NewTimer(remaining)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return ctx.Err()
+				case <-timer.C:
+					continue
+				}
+			}
+		}
+
+		attemptNo, err := w.repo.StartAttempt(ctx, notificationID)
+		if err != nil {
+			return fmt.Errorf("start attempt: %w", err)
+		}
+		err = w.sender.Send(ctx, nf.Recipient, nf.Message)
+		if err != nil {
+			kind, retryAfter := classifySendError(err)
+			if kind == failurePermanent {
+				saveErr := w.repo.MarkFailed(ctx, notificationID, attemptNo, err.Error())
+				if saveErr != nil {
+					return fmt.Errorf("mark notification failed: %w", saveErr)
+				}
+				err = w.queue.Ack(ctx, streamID)
+				if err != nil {
+					return fmt.Errorf("ack error: %w", err)
+				}
+				return nil
+			}
+			if kind == failureTemporary {
+				var delay time.Duration
+				switch attemptNo {
+				case 1:
+					delay = time.Second
+				case 2:
+					delay = 3 * time.Second
+				case 3:
+					delay = 9 * time.Second
+				case 4:
+					delay = 27 * time.Second
+				}
+				if retryAfter > delay {
+					delay = retryAfter
+				}
+				nextAttempt := time.Now().Add(delay)
+				saveErr := w.repo.MarkTemporaryFailure(ctx, notificationID, attemptNo, err.Error(), nextAttempt)
+				if saveErr != nil {
+					return fmt.Errorf("mark temporary failed: %w", saveErr)
+				}
+				continue
+			}
+			return fmt.Errorf("send notification: %w", err)
+		}
+		err = w.repo.MarkSent(ctx, notificationID, attemptNo)
+		if err != nil {
+			return fmt.Errorf("mark notification sent: %w", err)
+		}
 		err = w.queue.Ack(ctx, streamID)
 		if err != nil {
 			return fmt.Errorf("ack queue: %w", err)
 		}
 		return nil
 	}
-	attemptNo, err := w.repo.StartAttempt(ctx, notificationID)
-	if err != nil {
-		return fmt.Errorf("start attempt: %w", err)
-	}
-	err = w.sender.Send(ctx, nf.Recipient, nf.Message)
-	if err != nil {
-		kind, _ := classifySendError(err)
-		if kind == failurePermanent {
-			saveErr := w.repo.MarkFailed(ctx, notificationID, attemptNo, err.Error())
-			if saveErr != nil {
-				return fmt.Errorf("mark notification failed: %w", saveErr)
-			}
-			err = w.queue.Ack(ctx, streamID)
-			if err != nil {
-				return fmt.Errorf("ack error: %w", err)
-			}
-			return nil
-		}
-		return fmt.Errorf("send notification: %w", err)
-	}
-	err = w.repo.MarkSent(ctx, notificationID, attemptNo)
-	if err != nil {
-		return fmt.Errorf("mark notification sent: %w", err)
-	}
-	err = w.queue.Ack(ctx, streamID)
-	if err != nil {
-		return fmt.Errorf("ack queue: %w", err)
-	}
-	return nil
 }
 
 func (w *Worker) Run(ctx context.Context, consumer string) error {
