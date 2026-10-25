@@ -213,3 +213,43 @@ func (r *NotificationRepository) MarkTemporaryFailure(ctx context.Context, id in
 	}
 	return nil
 }
+
+func (r *NotificationRepository) RecoverAttempt(ctx context.Context, id int64, attemptNo int) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("start transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	status := "failed"
+
+	if attemptNo >= 1 && attemptNo <= 4 {
+		status = "pending"
+	}
+	errorMessage := "worker stopped before attempt result was saved"
+	queryUpdate1 := `update notification_attempts set outcome = 'unknown',
+													finished_at = now(),
+													error = $3
+					where notification_id = $1 and outcome = 'started' and attempt_no = $2`
+	tag, err := tx.Exec(ctx, queryUpdate1, id, attemptNo, errorMessage)
+	if err != nil {
+		return fmt.Errorf("mark notification: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("notification not in expected state")
+	}
+	queryUpdate2 := `update notifications set status = $3, last_error = $4,
+											next_attempt_at = NULL, sent_at = NULL
+					where id = $1 and status = 'processing' and attempts = $2`
+	tag, err = tx.Exec(ctx, queryUpdate2, id, attemptNo, status, errorMessage)
+	if err != nil {
+		return fmt.Errorf("mark notification: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("notification not in expected state")
+	}
+	err = tx.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
+}
