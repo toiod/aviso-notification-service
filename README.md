@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Логотип Aviso" width="240">
+  <img src="assets/logo.png" alt="Логотип Aviso" width="120" height="120">
 </p>
 
 # Aviso — Notification Service
